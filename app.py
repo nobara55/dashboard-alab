@@ -1,10 +1,4 @@
 import streamlit as st
-
-# 📊 Análisis de decisiones bajo incertidumbre
-
-# Este módulo utiliza estadística descriptiva, valor esperado, y probabilidades históricas
-# para evaluar estrategias de trading. No se basa en teoría de juegos, ya que el mercado
-# no es un agente estratégico real ni responde conscientemente a tus decisiones.
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -803,9 +797,9 @@ if st.session_state.current_page == "principal":
             with st.expander("📊 Ver Detalles de Rachas"):
                 st.dataframe(rachas[['Días', 'Tipo']].rename(columns={'Días': 'Días consecutivos'}), use_container_width=True)
 
-        
+        # === SECCIÓN DE ANÁLISIS DE ESTRATEGIAS FINANCIERAS ===
         st.markdown("---")
-        st.markdown("## Estrategias Optimizadas de Trading Overnight")
+        st.markdown("## Estrategias de Trading Basadas en Datos Históricos")
         st.markdown("### Análisis de Decisión Bajo Incertidumbre")
         
         st.info("💡 Para análisis avanzado de patrones, visite la pestaña '🔍 Patrones Identificados'")
@@ -825,7 +819,7 @@ if st.session_state.current_page == "principal":
                 return 0
             return round((rendimiento - tasa_libre_riesgo) / volatilidad, 3)
 
-        
+        # Estrategias basadas en análisis estadístico
         estrategias = [
             {
                 "nombre": "Viernes Alcista",
@@ -879,11 +873,11 @@ if st.session_state.current_page == "principal":
             }
         ]
 
-        
+        # Selector de estrategia
         estrategia_nombre = st.selectbox("Seleccione una estrategia", [e["nombre"] for e in estrategias], key="estrategia_principal")
         estrategia_seleccionada = next(e for e in estrategias if e["nombre"] == estrategia_nombre)
 
-        
+        # Mostrar detalles de la estrategia
         col1, col2 = st.columns(2)
         
         with col1:
@@ -941,7 +935,7 @@ if st.session_state.current_page == "principal":
             df_escenarios = pd.DataFrame(escenarios_data)
             st.table(df_escenarios)
             
-            st.markdown("## Estrategias Optimizadas de Trading Overnight")
+            st.markdown("#### Fundamento de la Estrategia")
             st.write(estrategia_seleccionada['fundamento'])
             
             st.markdown("#### Interpretación de Métricas")
@@ -1000,9 +994,9 @@ if st.session_state.current_page == "principal":
             """)
         
         st.markdown("---")
-        st.markdown("## Estrategias Optimizadas de Trading Overnight")
+        st.markdown("### 📈 Estrategias Disponibles - Resumen")
         
-        
+        # Tabla comparativa de estrategias
         estrategias_tabla = []
         for estrategia in estrategias:
             ve = calcular_valor_esperado(estrategia['beneficio'], estrategia['stopLoss'], estrategia['probabilidad'])
@@ -1036,7 +1030,7 @@ if st.session_state.current_page == "principal":
         """)
         
         st.markdown("---")
-        st.markdown("## Estrategias Optimizadas de Trading Overnight")
+        st.markdown("### 🎯 Estrategias Disponibles")
         
         estrategias_info = pd.DataFrame([
             {
@@ -1407,8 +1401,8 @@ elif st.session_state.current_page == "patrones":
                                 days_since = (df['Date'].iloc[-1] - gap_row['Date']).days
                                 st.metric("Días transcurridos", f"{days_since}")
                     
-                    
-                    st.markdown("## Estrategias Optimizadas de Trading Overnight")
+                    # Estrategia recomendada
+                    st.markdown("#### 💡 Estrategia de Gaps:")
                     avg_fill_rate = recent_gaps['Gap_Fill'].mean() * 100
                     
                     if avg_fill_rate > 70:
@@ -1537,7 +1531,7 @@ elif st.session_state.current_page == "patrones":
                         st.metric("Soporte Cercano", "Por debajo de S1")
                 
                 # Recomendación estratégica
-                st.markdown("## Estrategias Optimizadas de Trading Overnight")
+                st.markdown("#### 💡 Estrategia Recomendada:")
                 
                 resistance_distance = (nearest_resistance['level'] / current_price - 1) * 100 if nearest_resistance['level'] > current_price else 100
                 support_distance = (1 - nearest_support['level'] / current_price) * 100 if nearest_support['level'] < current_price else 100
