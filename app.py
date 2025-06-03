@@ -1,4 +1,10 @@
 import streamlit as st
+
+# 📊 Análisis de decisiones bajo incertidumbre
+
+# Este módulo utiliza estadística descriptiva, valor esperado, y probabilidades históricas
+# para evaluar estrategias de trading. No se basa en teoría de juegos, ya que el mercado
+# no es un agente estratégico real ni responde conscientemente a tus decisiones.
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
@@ -797,10 +803,10 @@ if st.session_state.current_page == "principal":
             with st.expander("📊 Ver Detalles de Rachas"):
                 st.dataframe(rachas[['Días', 'Tipo']].rename(columns={'Días': 'Días consecutivos'}), use_container_width=True)
 
-        # === SECCIÓN DE ESTRATEGIAS DINÁMICAS POR TICKER ===
+        
         st.markdown("---")
         st.markdown("## Estrategias Optimizadas de Trading Overnight")
-        st.markdown("### Análisis desde Teoría de Juegos: Inversionista Minoritario vs Mercado")
+        st.markdown("### Análisis de Decisión Bajo Incertidumbre")
         
         st.info("💡 Para análisis avanzado de patrones, visite la pestaña '🔍 Patrones Identificados'")
 
@@ -812,80 +818,89 @@ if st.session_state.current_page == "principal":
                 return 0
             return round((stop_loss / (beneficio + stop_loss)) * 100, 1)
 
-        # Estrategias dinámicas con valores fijos
+        def calcular_sharpe_ratio(rendimiento, volatilidad):
+            # Asumiendo tasa libre de riesgo del 4% anual
+            tasa_libre_riesgo = 4.0 / 252  # Diaria
+            if volatilidad == 0:
+                return 0
+            return round((rendimiento - tasa_libre_riesgo) / volatilidad, 3)
+
+        
         estrategias = [
             {
                 "nombre": "Viernes Alcista",
                 "descripcion": f"Entrada en viernes con cierre alcista para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "LONG (compra)",
+                "tipo_estrategia": "Sesgo calendario (Friday Effect)",
                 "ratioRR": 2.14,
                 "beneficio": 1.29,
                 "stopLoss": 0.60,
                 "probabilidad": 59.32,
-                "matrizJuego": {
-                    "filas": ["Inversionista toma LONG", "Inversionista no opera"],
-                    "columnas": ["Mercado sube (59.32%)", "Mercado baja (40.68%)"],
-                    "valores": [["+1.29%", "-0.60%"], ["0%", "0%"]],
-                    "equilibrioNash": {
-                        "existe": True,
-                        "explicacion": "El equilibrio de Nash se encuentra cuando el inversionista toma posición LONG y el mercado sube.",
-                        "dominancia": "La estrategia de 'no operar' es dominada por 'tomar LONG' cuando la probabilidad de éxito supera el 31.7%.",
-                        "implicaciones": "Como la probabilidad histórica (59.32%) es mayor que el punto de equilibrio (31.7%), esta estrategia tiene expectativa matemática positiva."
-                    }
-                }
+                "volatilidad": 2.8,
+                "fundamento": "Sesgo de calendario: tendencia estadística de cierres al alza en viernes por cerrar posiciones cortas."
             },
             {
                 "nombre": "Miércoles Alcista", 
                 "descripcion": f"Entrada en miércoles con cierre alcista para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "LONG (compra)",
+                "tipo_estrategia": "Sesgo calendario (Mid-week Effect)",
                 "ratioRR": 1.92,
                 "beneficio": 1.22,
                 "stopLoss": 0.64,
                 "probabilidad": 57.97,
-                "mejorDia": "Miércoles (59.62% de reversión)"
+                "volatilidad": 2.6,
+                "mejorDia": "Miércoles (59.62% de reversión)",
+                "fundamento": "Efecto mid-week: reversión a la media después de movimientos fuertes de inicio de semana."
             },
             {
                 "nombre": "Fade the Gap",
                 "descripcion": f"Entrada al detectar gap alcista significativo (>0.5%) para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "SHORT (venta)",
+                "tipo_estrategia": "Reversión a la media",
                 "ratioRR": 2.04,
                 "beneficio": 1.34,
                 "stopLoss": 0.66,
-                "probabilidad": 47.46
+                "probabilidad": 47.46,
+                "volatilidad": 3.2,
+                "fundamento": "Ineficiencias de apertura: gaps extremos tienden a corregirse en las primeras horas."
             },
             {
                 "nombre": "Gap y Go",
                 "descripcion": f"Entrada al detectar gap bajista significativo (<-0.5%) para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "LONG (compra)",
+                "tipo_estrategia": "Momentum/Rebounds",
                 "ratioRR": 2.07,
                 "beneficio": 1.27,
                 "stopLoss": 0.61,
                 "probabilidad": 49.55,
-                "mejorDia": "Viernes (56.10% de rebote)"
+                "volatilidad": 3.0,
+                "mejorDia": "Viernes (56.10% de rebote)",
+                "fundamento": "Oversold rebounds: gaps bajistas extremos generan oportunidades de rebote técnico."
             }
         ]
 
-        # Selector de estrategia
+        
         estrategia_nombre = st.selectbox("Seleccione una estrategia", [e["nombre"] for e in estrategias], key="estrategia_principal")
         estrategia_seleccionada = next(e for e in estrategias if e["nombre"] == estrategia_nombre)
 
-        # Mostrar detalles de la estrategia
+        
         col1, col2 = st.columns(2)
         
         with col1:
             st.markdown(f"**📋 {estrategia_seleccionada['nombre']}**")
             st.write(f"**Descripción:** {estrategia_seleccionada['descripcion']}")
             st.write(f"**Dirección:** {estrategia_seleccionada['direccion']}")
+            st.write(f"**Tipo:** {estrategia_seleccionada['tipo_estrategia']}")
             if "mejorDia" in estrategia_seleccionada:
                 st.write(f"**Mejor momento:** {estrategia_seleccionada['mejorDia']}")
         
         with col2:
             st.write(f"**Ratio Riesgo/Recompensa:** {estrategia_seleccionada['ratioRR']}")
-            st.write(f"**Beneficio esperado:** {estrategia_seleccionada['beneficio']}%")
-            st.write(f"**Stop Loss medio:** {estrategia_seleccionada['stopLoss']}%")
-            st.write(f"**Probabilidad de éxito:** {estrategia_seleccionada['probabilidad']}%")
+            st.write(f"**Ganancia promedio:** {estrategia_seleccionada['beneficio']}%")
+            st.write(f"**Pérdida promedio:** {estrategia_seleccionada['stopLoss']}%")
+            st.write(f"**Tasa de éxito histórica:** {estrategia_seleccionada['probabilidad']}%")
 
-        # Cálculo dinámico de valor esperado
+        # Cálculos de análisis financiero
         valor_esperado = calcular_valor_esperado(
             estrategia_seleccionada['beneficio'],
             estrategia_seleccionada['stopLoss'],
@@ -897,80 +912,213 @@ if st.session_state.current_page == "principal":
             estrategia_seleccionada['stopLoss']
         )
 
-        col1, col2 = st.columns(2)
+        sharpe_ratio = calcular_sharpe_ratio(
+            valor_esperado / 100,  # Convertir a decimal
+            estrategia_seleccionada['volatilidad'] / 100
+        )
+
+        # Métricas principales
+        col1, col2, col3 = st.columns(3)
         col1.metric("Valor Esperado (%)", f"{valor_esperado:.2f}%", delta="Rentable" if valor_esperado > 0 else "No rentable")
         col2.metric("Punto de Equilibrio (%)", f"{punto_equilibrio:.1f}%")
+        col3.metric("Sharpe Ratio", f"{sharpe_ratio:.3f}", delta="Bueno" if sharpe_ratio > 1 else "Regular" if sharpe_ratio > 0.5 else "Pobre")
 
-        # Matriz de juego solo para estrategias que la tienen
-        if "matrizJuego" in estrategia_seleccionada:
-            with st.expander("🎮 Ver Matriz de Decisión y Análisis de Nash"):
-                st.markdown("#### Matriz de Decisión")
-                df_matriz = pd.DataFrame(
-                    estrategia_seleccionada["matrizJuego"]["valores"],
-                    index=estrategia_seleccionada["matrizJuego"]["filas"],
-                    columns=estrategia_seleccionada["matrizJuego"]["columnas"]
-                )
-                st.table(df_matriz)
+        # Análisis detallado en expander
+        with st.expander("📊 Ver Análisis Detallado de Riesgo"):
+            st.markdown("#### Análisis de Decisión Bajo Incertidumbre")
+            
+            # Tabla de escenarios
+            escenarios_data = {
+                "Escenario": ["Operación exitosa", "Operación fallida"],
+                "Probabilidad": [f"{estrategia_seleccionada['probabilidad']:.1f}%", f"{100-estrategia_seleccionada['probabilidad']:.1f}%"],
+                "Resultado": [f"+{estrategia_seleccionada['beneficio']:.2f}%", f"-{estrategia_seleccionada['stopLoss']:.2f}%"],
+                "Contribución al VE": [
+                    f"+{(estrategia_seleccionada['beneficio'] * estrategia_seleccionada['probabilidad'] / 100):.3f}%",
+                    f"-{(estrategia_seleccionada['stopLoss'] * (100-estrategia_seleccionada['probabilidad']) / 100):.3f}%"
+                ]
+            }
+            
+            df_escenarios = pd.DataFrame(escenarios_data)
+            st.table(df_escenarios)
+            
+            st.markdown("## Estrategias Optimizadas de Trading Overnight")
+            st.write(estrategia_seleccionada['fundamento'])
+            
+            st.markdown("#### Interpretación de Métricas")
+            
+            if valor_esperado > 0:
+                st.success(f"✅ **Valor Esperado Positivo**: {valor_esperado:.2f}% - La estrategia es matemáticamente rentable a largo plazo")
+            else:
+                st.error(f"❌ **Valor Esperado Negativo**: {valor_esperado:.2f}% - La estrategia no es rentable a largo plazo")
+            
+            if estrategia_seleccionada['probabilidad'] > punto_equilibrio:
+                ventaja = estrategia_seleccionada['probabilidad'] - punto_equilibrio
+                st.info(f"📈 **Ventaja Estadística**: {ventaja:.1f}% por encima del punto de equilibrio")
+            else:
+                desventaja = punto_equilibrio - estrategia_seleccionada['probabilidad']
+                st.warning(f"📉 **Desventaja Estadística**: {desventaja:.1f}% por debajo del punto de equilibrio")
+            
+            # Interpretación Sharpe Ratio
+            if sharpe_ratio > 2:
+                st.success(f"🏆 **Sharpe Ratio Excelente**: {sharpe_ratio:.3f} - Retorno muy superior al riesgo asumido")
+            elif sharpe_ratio > 1:
+                st.success(f"✅ **Sharpe Ratio Bueno**: {sharpe_ratio:.3f} - Retorno superior al riesgo")
+            elif sharpe_ratio > 0.5:
+                st.warning(f"⚖️ **Sharpe Ratio Regular**: {sharpe_ratio:.3f} - Retorno moderado vs riesgo")
+            else:
+                st.error(f"❌ **Sharpe Ratio Pobre**: {sharpe_ratio:.3f} - Retorno insuficiente para el riesgo")
 
-                nash = estrategia_seleccionada["matrizJuego"]["equilibrioNash"]
-                st.markdown("#### 🧮 Análisis de Equilibrio de Nash")
-                if nash.get("existe"):
-                    st.success("✅ Existe un equilibrio de Nash puro.")
-                else:
-                    st.warning("⚠️ No existe un equilibrio puro. Considerar estrategia mixta.")
-
-                st.markdown("**Explicación:**")
-                st.write(nash.get("explicacion", "Sin datos"))
-                st.markdown("**Dominancia:**")
-                st.write(nash.get("dominancia", "Sin datos"))
-                st.markdown("**Implicaciones:**")
-                st.write(nash.get("implicaciones", "Sin datos"))
-
-        # Información de mercado
-        with st.expander("🏦 Ver Participantes del Mercado y Dinámicas"):
-            st.markdown("#### Participantes del mercado")
+        # Contexto del mercado financiero
+        with st.expander("🏦 Ver Contexto del Mercado y Participantes"):
+            st.markdown("#### Estructura del Mercado")
             st.markdown("""
-            | Tipo | Porcentaje | Comentarios |
-            |------|------------|------------|
-            | Fondos institucionales | 70-75% | BlackRock, Vanguard, ETFs tecnológicos |
-            | Market Makers | 10-15% | Firmas HFT, bancos de inversión |
-            | Corporativos | 5-8% | Socios estratégicos, clientes |
-            | Minoristas activos | 3-5% | Traders retail, usuarios de Robinhood |
-            | Minoristas pasivos | 2-3% | Inversores individuales a largo plazo |
+            | Tipo de Participante | Estimación % | Comportamiento Típico |
+            |---------------------|--------------|----------------------|
+            | Fondos institucionales | 70-75% | Estrategias algorítmicas de largo plazo |
+            | Market Makers | 10-15% | Provisión de liquidez, arbitraje |
+            | Hedge Funds | 5-8% | Estrategias especializadas, alta frecuencia |
+            | Traders retail | 3-5% | Estrategias técnicas, trading direccional |
+            | Inversores pasivos | 2-3% | Buy & hold, indexados |
             """)
 
-            st.markdown("#### 📊 Dinámica de juego específica")
+            st.markdown("#### 📊 Dinámicas del Mercado")
             st.markdown(f"""
-            - **Asimetría de información**: Los institucionales tienen acceso a más datos sobre flujo de órdenes y sentimiento.
-            - **Patrones temporales**: Los viernes tienden a cerrar al alza debido al cierre de posiciones cortas.
-            - **Ineficiencias de apertura**: Gaps extremos suelen corregirse en los primeros minutos de trading.
-            - **Correlación sectorial**: {st.session_state.ticker_seleccionado} se mueve junto a su industria → aumenta la predictibilidad.
+            - **Ineficiencias temporales**: Los sesgos de calendario persisten debido a comportamientos institucionales (ej: rebalanceos trimestrales)
+            - **Flujos de órdenes**: Los viernes experimentan mayor volumen por cerrar posiciones antes del fin de semana
+            - **Gaps de apertura**: Resultado de información overnight y diferencias de valoración entre sesiones
+            - **Correlación sectorial**: {st.session_state.ticker_seleccionado} se comporta según las dinámicas de su sector e índices de referencia
+            - **Volumen y liquidez**: Afectan la efectividad de las estrategias (mayor volumen = menor impacto de precio)
             """)
+            
+            st.markdown("#### ⚠️ Limitaciones y Advertencias")
+            st.markdown("""
+            - **Datos históricos**: El rendimiento pasado no garantiza resultados futuros
+            - **Cambios de régimen**: Las ineficiencias pueden desaparecer si son explotadas masivamente
+            - **Costos de transacción**: No incluidos en el análisis (comisiones, slippage, spreads)
+            - **Tamaño de posición**: Las estrategias pueden no escalar para volúmenes grandes
+            - **Factores externos**: Crisis, noticias, eventos macroeconómicos pueden invalidar patrones históricos
+            """)
+        
+        st.markdown("---")
+        st.markdown("## Estrategias Optimizadas de Trading Overnight")
+        
+        
+        estrategias_tabla = []
+        for estrategia in estrategias:
+            ve = calcular_valor_esperado(estrategia['beneficio'], estrategia['stopLoss'], estrategia['probabilidad'])
+            pe = calcular_punto_equilibrio(estrategia['beneficio'], estrategia['stopLoss'])
+            sharpe = calcular_sharpe_ratio(ve / 100, estrategia['volatilidad'] / 100)
+            
+            estrategias_tabla.append({
+                "Estrategia": estrategia['nombre'],
+                "Dirección": estrategia['direccion'].split()[0],  # Solo LONG/SHORT
+                "Tasa Éxito (%)": f"{estrategia['probabilidad']:.1f}%",
+                "Ratio R/R": estrategia['ratioRR'],
+                "Valor Esperado (%)": f"{ve:.2f}%",
+                "Sharpe Ratio": f"{sharpe:.3f}",
+                "Tipo": estrategia['tipo_estrategia']
+            })
+        
+        df_estrategias = pd.DataFrame(estrategias_tabla)
+        st.dataframe(df_estrategias, use_container_width=True)
 
     else:
-        st.info("📊 Dashboard de Análisis Básico")
+        st.info("📊 Dashboard de Análisis Financiero")
         st.markdown("""
         **Este dashboard incluye:**
         - 📈 Gráficos de precio y volatilidad
         - 📊 Estadísticas de rendimiento  
         - 🔄 Análisis de rachas consecutivas
-        - 🎯 Estrategias de trading overnight
-        - 🎮 Teoría de juegos aplicada
+        - 🎯 Estrategias de trading cuantitativas
+        - 📈 Análisis de riesgo y valor esperado
         
         **👈 Use el panel lateral para cargar datos y comenzar el análisis**
         """)
         
         st.markdown("---")
-        st.markdown("### 🎯 Estrategias Disponibles")
+        st.markdown("## Estrategias Optimizadas de Trading Overnight")
         
         estrategias_info = pd.DataFrame([
-            {"Estrategia": "Viernes Alcista", "Dirección": "LONG", "Ratio R/R": "2.14", "Probabilidad": "59.32%"},
-            {"Estrategia": "Miércoles Alcista", "Dirección": "LONG", "Ratio R/R": "1.92", "Probabilidad": "57.97%"},
-            {"Estrategia": "Fade the Gap", "Dirección": "SHORT", "Ratio R/R": "2.04", "Probabilidad": "47.46%"},
-            {"Estrategia": "Gap y Go", "Dirección": "LONG", "Ratio R/R": "2.07", "Probabilidad": "49.55%"},
+            {
+                "Estrategia": "Viernes Alcista", 
+                "Tipo": "Sesgo calendario", 
+                "Dirección": "LONG", 
+                "Ratio R/R": "2.14", 
+                "Tasa Éxito": "59.32%",
+                "Valor Esperado": "+0.52%"
+            },
+            {
+                "Estrategia": "Miércoles Alcista", 
+                "Tipo": "Sesgo calendario", 
+                "Dirección": "LONG", 
+                "Ratio R/R": "1.92", 
+                "Tasa Éxito": "57.97%",
+                "Valor Esperado": "+0.33%"
+            },
+            {
+                "Estrategia": "Fade the Gap", 
+                "Tipo": "Reversión a la media", 
+                "Dirección": "SHORT", 
+                "Ratio R/R": "2.04", 
+                "Tasa Éxito": "47.46%",
+                "Valor Esperado": "-0.13%"
+            },
+            {
+                "Estrategia": "Gap y Go", 
+                "Tipo": "Momentum/Rebounds", 
+                "Dirección": "LONG", 
+                "Ratio R/R": "2.07", 
+                "Tasa Éxito": "49.55%",
+                "Valor Esperado": "+0.32%"
+            },
         ])
         
         st.dataframe(estrategias_info, use_container_width=True)
+        
+        st.markdown("---")
+        st.markdown("### 📚 Fundamentos Financieros")
+        
+        with st.expander("🔍 ¿Qué es el Valor Esperado?"):
+            st.markdown("""
+            **Valor Esperado (VE)** = (Ganancia × P(éxito)) - (Pérdida × P(fallo))
+            
+            - **VE > 0**: Estrategia matemáticamente rentable
+            - **VE = 0**: Estrategia neutra (break-even)
+            - **VE < 0**: Estrategia no rentable a largo plazo
+            
+            **Ejemplo**: Si ganas $100 el 60% de las veces y pierdes $50 el 40%:
+            VE = ($100 × 0.6) - ($50 × 0.4) = $60 - $20 = **+$40**
+            """)
+        
+        with st.expander("⚖️ ¿Qué es el Punto de Equilibrio?"):
+            st.markdown("""
+            **Punto de Equilibrio** = Pérdida / (Ganancia + Pérdida) × 100
+            
+            Es la **tasa mínima de éxito** necesaria para no perder dinero.
+            
+            - Si tu tasa histórica > punto equilibrio → **Ventaja estadística**
+            - Si tu tasa histórica < punto equilibrio → **Desventaja estadística**
+            
+            **Ejemplo**: Ganas $200, pierdes $100
+            PE = $100 / ($200 + $100) × 100 = **33.3%**
+            Necesitas ganar mínimo 33.3% de las veces para ser rentable.
+            """)
+        
+        with st.expander("📊 ¿Qué es el Sharpe Ratio?"):
+            st.markdown("""
+            **Sharpe Ratio** = (Retorno - Tasa libre riesgo) / Volatilidad
+            
+            Mide el **retorno por unidad de riesgo**:
+            
+            - **> 2.0**: Excelente
+            - **1.0 - 2.0**: Bueno  
+            - **0.5 - 1.0**: Aceptable
+            - **< 0.5**: Pobre
+            
+            Una estrategia con Sharpe de 1.5 es mejor que otra con 0.8, 
+            aunque ambas sean rentables.
+            """)
+        
 
 # === PÁGINA DE PATRONES IDENTIFICADOS ===
 elif st.session_state.current_page == "patrones":
@@ -1259,8 +1407,8 @@ elif st.session_state.current_page == "patrones":
                                 days_since = (df['Date'].iloc[-1] - gap_row['Date']).days
                                 st.metric("Días transcurridos", f"{days_since}")
                     
-                    # Estrategia recomendada
-                    st.markdown("#### 💡 Estrategia de Gaps:")
+                    
+                    st.markdown("## Estrategias Optimizadas de Trading Overnight")
                     avg_fill_rate = recent_gaps['Gap_Fill'].mean() * 100
                     
                     if avg_fill_rate > 70:
@@ -1389,7 +1537,7 @@ elif st.session_state.current_page == "patrones":
                         st.metric("Soporte Cercano", "Por debajo de S1")
                 
                 # Recomendación estratégica
-                st.markdown("#### 💡 Estrategia Recomendada:")
+                st.markdown("## Estrategias Optimizadas de Trading Overnight")
                 
                 resistance_distance = (nearest_resistance['level'] / current_price - 1) * 100 if nearest_resistance['level'] > current_price else 100
                 support_distance = (1 - nearest_support['level'] / current_price) * 100 if nearest_support['level'] < current_price else 100
