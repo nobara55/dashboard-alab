@@ -199,7 +199,158 @@ def get_stock_data(ticker, period, custom_start=None, custom_end=None):
         st.warning(f"Error al procesar datos para {ticker}: {e}")
         return None
 
-# === FUNCIONES PARA PATRONES DE TRADING ===
+# === FUNCIONES DE ANÁLISIS CUANTITATIVO PROFESIONAL ===
+
+def calculate_drawdown(prices):
+    """Calcula maximum drawdown y drawdown series"""
+    if len(prices) < 2:
+        return 0, []
+    
+    # Calcular running maximum (peak)
+    running_max = prices.cummax()
+    
+    # Calcular drawdown en cada punto
+    drawdown = (prices - running_max) / running_max * 100
+    
+    # Maximum drawdown
+    max_drawdown = drawdown.min()
+    
+    return max_drawdown, drawdown
+
+def calculate_var(returns, confidence_levels=[0.95, 0.99]):
+    """Calcula Value at Risk usando distribución empírica"""
+    if len(returns) < 10:
+        return {}
+    
+    returns_clean = returns.dropna()
+    if len(returns_clean) == 0:
+        return {}
+    
+    var_results = {}
+    for conf in confidence_levels:
+        var_percentile = (1 - conf) * 100
+        var_value = np.percentile(returns_clean, var_percentile)
+        var_results[f'VaR_{int(conf*100)}'] = var_value
+    
+    return var_results
+
+def calculate_cvar(returns, confidence_levels=[0.95, 0.99]):
+    """Calcula Conditional VaR (Expected Shortfall)"""
+    if len(returns) < 10:
+        return {}
+    
+    returns_clean = returns.dropna()
+    if len(returns_clean) == 0:
+        return {}
+    
+    cvar_results = {}
+    for conf in confidence_levels:
+        var_percentile = (1 - conf) * 100
+        var_threshold = np.percentile(returns_clean, var_percentile)
+        
+        # CVaR es la media de los retornos peores que VaR
+        tail_losses = returns_clean[returns_clean <= var_threshold]
+        if len(tail_losses) > 0:
+            cvar_value = tail_losses.mean()
+            cvar_results[f'CVaR_{int(conf*100)}'] = cvar_value
+        
+    return cvar_results
+
+def calculate_real_strategy_metrics(df, strategy_type="friday_bullish"):
+    """Calcula métricas reales de estrategia basadas en datos históricos"""
+    if df is None or len(df) < 50:
+        return None
+    
+    # Crear copia para evitar modificar original
+    data = df.copy()
+    
+    # Filtrar datos según estrategia
+    if strategy_type == "friday_bullish":
+        # Viernes con cierre alcista
+        data['Day'] = data['Date'].dt.dayofweek
+        data['Daily_Return'] = data['Close'].pct_change() * 100
+        friday_bullish = data[(data['Day'] == 4) & (data['Daily_Return'] > 0)]
+        
+        if len(friday_bullish) < 5:
+            return None
+            
+        # Calcular retorno del día siguiente
+        data['Next_Day_Return'] = data['Daily_Return'].shift(-1)
+        strategy_returns = friday_bullish['Next_Day_Return'].dropna()
+        
+    elif strategy_type == "wednesday_bullish":
+        # Miércoles con cierre alcista
+        data['Day'] = data['Date'].dt.dayofweek
+        data['Daily_Return'] = data['Close'].pct_change() * 100
+        wednesday_bullish = data[(data['Day'] == 2) & (data['Daily_Return'] > 0)]
+        
+        if len(wednesday_bullish) < 5:
+            return None
+            
+        data['Next_Day_Return'] = data['Daily_Return'].shift(-1)
+        strategy_returns = wednesday_bullish['Next_Day_Return'].dropna()
+        
+    elif strategy_type == "fade_gap":
+        # Gaps alcistas > 0.5%
+        data['Gap'] = ((data['Open'] - data['Close'].shift(1)) / data['Close'].shift(1)) * 100
+        data['Daily_Return'] = data['Close'].pct_change() * 100
+        gap_up_days = data[data['Gap'] > 0.5]
+        
+        if len(gap_up_days) < 5:
+            return None
+            
+        # Para fade, invertimos el signo (vendemos)
+        strategy_returns = -gap_up_days['Daily_Return']
+        
+    elif strategy_type == "gap_go":
+        # Gaps bajistas < -0.5%
+        data['Gap'] = ((data['Open'] - data['Close'].shift(1)) / data['Close'].shift(1)) * 100
+        data['Daily_Return'] = data['Close'].pct_change() * 100
+        gap_down_days = data[data['Gap'] < -0.5]
+        
+        if len(gap_down_days) < 5:
+            return None
+            
+        strategy_returns = gap_down_days['Daily_Return']
+    
+    else:
+        return None
+    
+    if len(strategy_returns) < 5:
+        return None
+    
+    # Calcular métricas
+    total_trades = len(strategy_returns)
+    win_rate = (strategy_returns > 0).sum() / total_trades * 100
+    avg_win = strategy_returns[strategy_returns > 0].mean() if (strategy_returns > 0).any() else 0
+    avg_loss = strategy_returns[strategy_returns < 0].mean() if (strategy_returns < 0).any() else 0
+    expected_value = strategy_returns.mean()
+    volatility = strategy_returns.std()
+    
+    # Risk metrics
+    var_metrics = calculate_var(strategy_returns)
+    cvar_metrics = calculate_cvar(strategy_returns)
+    
+    # Simular equity curve para drawdown
+    equity_curve = (1 + strategy_returns / 100).cumprod() * 100
+    max_dd, dd_series = calculate_drawdown(equity_curve)
+    
+    return {
+        'total_trades': total_trades,
+        'win_rate': win_rate,
+        'avg_win': avg_win,
+        'avg_loss': abs(avg_loss),
+        'expected_value': expected_value,
+        'volatility': volatility,
+        'max_drawdown': max_dd,
+        'var_95': var_metrics.get('VaR_95', 0),
+        'var_99': var_metrics.get('VaR_99', 0),
+        'cvar_95': cvar_metrics.get('CVaR_95', 0),
+        'cvar_99': cvar_metrics.get('CVaR_99', 0),
+        'strategy_returns': strategy_returns,
+        'equity_curve': equity_curve,
+        'drawdown_series': dd_series
+    }
 
 def analyze_volatility_patterns(df):
     """Análisis de patrones de volatilidad"""
@@ -797,85 +948,68 @@ if st.session_state.current_page == "principal":
             with st.expander("📊 Ver Detalles de Rachas"):
                 st.dataframe(rachas[['Días', 'Tipo']].rename(columns={'Días': 'Días consecutivos'}), use_container_width=True)
 
-        # === SECCIÓN DE ANÁLISIS DE ESTRATEGIAS FINANCIERAS ===
+        # === SECCIÓN DE ANÁLISIS DE ESTRATEGIAS CUANTITATIVAS ===
         st.markdown("---")
-        st.markdown("## Estrategias de Trading Basadas en Datos Históricos")
-        st.markdown("### Análisis de Decisión Bajo Incertidumbre")
+        st.markdown("## Análisis Cuantitativo de Estrategias")
+        st.markdown("### Métricas de Fondos de Inversión Profesionales")
         
         st.info("💡 Para análisis avanzado de patrones, visite la pestaña '🔍 Patrones Identificados'")
 
-        def calcular_valor_esperado(beneficio, stop_loss, probabilidad):
-            return round((beneficio * probabilidad / 100) - (stop_loss * (100 - probabilidad) / 100), 2)
-
-        def calcular_punto_equilibrio(beneficio, stop_loss):
-            if beneficio + stop_loss == 0:
-                return 0
-            return round((stop_loss / (beneficio + stop_loss)) * 100, 1)
-
-        def calcular_sharpe_ratio(rendimiento, volatilidad):
-            # Asumiendo tasa libre de riesgo del 4% anual
-            tasa_libre_riesgo = 4.0 / 252  # Diaria
-            if volatilidad == 0:
-                return 0
-            return round((rendimiento - tasa_libre_riesgo) / volatilidad, 3)
-
-        # Estrategias basadas en análisis estadístico
-        estrategias = [
+        # Calcular métricas reales de las estrategias
+        st.markdown("#### 🔄 Calculando métricas desde datos históricos...")
+        
+        strategy_configs = [
             {
                 "nombre": "Viernes Alcista",
+                "codigo": "friday_bullish",
                 "descripcion": f"Entrada en viernes con cierre alcista para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "LONG (compra)",
                 "tipo_estrategia": "Sesgo calendario (Friday Effect)",
-                "ratioRR": 2.14,
-                "beneficio": 1.29,
-                "stopLoss": 0.60,
-                "probabilidad": 59.32,
-                "volatilidad": 2.8,
                 "fundamento": "Sesgo de calendario: tendencia estadística de cierres al alza en viernes por cerrar posiciones cortas."
             },
             {
                 "nombre": "Miércoles Alcista", 
+                "codigo": "wednesday_bullish",
                 "descripcion": f"Entrada en miércoles con cierre alcista para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "LONG (compra)",
                 "tipo_estrategia": "Sesgo calendario (Mid-week Effect)",
-                "ratioRR": 1.92,
-                "beneficio": 1.22,
-                "stopLoss": 0.64,
-                "probabilidad": 57.97,
-                "volatilidad": 2.6,
-                "mejorDia": "Miércoles (59.62% de reversión)",
                 "fundamento": "Efecto mid-week: reversión a la media después de movimientos fuertes de inicio de semana."
             },
             {
                 "nombre": "Fade the Gap",
+                "codigo": "fade_gap",
                 "descripcion": f"Entrada al detectar gap alcista significativo (>0.5%) para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "SHORT (venta)",
                 "tipo_estrategia": "Reversión a la media",
-                "ratioRR": 2.04,
-                "beneficio": 1.34,
-                "stopLoss": 0.66,
-                "probabilidad": 47.46,
-                "volatilidad": 3.2,
                 "fundamento": "Ineficiencias de apertura: gaps extremos tienden a corregirse en las primeras horas."
             },
             {
                 "nombre": "Gap y Go",
+                "codigo": "gap_go",
                 "descripcion": f"Entrada al detectar gap bajista significativo (<-0.5%) para {st.session_state.ticker_seleccionado.upper()}",
                 "direccion": "LONG (compra)",
                 "tipo_estrategia": "Momentum/Rebounds",
-                "ratioRR": 2.07,
-                "beneficio": 1.27,
-                "stopLoss": 0.61,
-                "probabilidad": 49.55,
-                "volatilidad": 3.0,
-                "mejorDia": "Viernes (56.10% de rebote)",
                 "fundamento": "Oversold rebounds: gaps bajistas extremos generan oportunidades de rebote técnico."
             }
         ]
 
+        # Calcular métricas reales para cada estrategia
+        estrategias_calculadas = []
+        for config in strategy_configs:
+            metrics = calculate_real_strategy_metrics(df, config["codigo"])
+            if metrics:
+                estrategia = config.copy()
+                estrategia.update(metrics)
+                estrategias_calculadas.append(estrategia)
+
+        if not estrategias_calculadas:
+            st.warning("⚠️ No hay suficientes datos históricos para calcular estrategias. Intente con un período más largo.")
+            return
+
         # Selector de estrategia
-        estrategia_nombre = st.selectbox("Seleccione una estrategia", [e["nombre"] for e in estrategias], key="estrategia_principal")
-        estrategia_seleccionada = next(e for e in estrategias if e["nombre"] == estrategia_nombre)
+        strategy_names = [e["nombre"] for e in estrategias_calculadas]
+        estrategia_nombre = st.selectbox("Seleccione una estrategia", strategy_names, key="estrategia_principal")
+        estrategia_seleccionada = next(e for e in estrategias_calculadas if e["nombre"] == estrategia_nombre)
 
         # Mostrar detalles de la estrategia
         col1, col2 = st.columns(2)
@@ -885,82 +1019,158 @@ if st.session_state.current_page == "principal":
             st.write(f"**Descripción:** {estrategia_seleccionada['descripcion']}")
             st.write(f"**Dirección:** {estrategia_seleccionada['direccion']}")
             st.write(f"**Tipo:** {estrategia_seleccionada['tipo_estrategia']}")
-            if "mejorDia" in estrategia_seleccionada:
-                st.write(f"**Mejor momento:** {estrategia_seleccionada['mejorDia']}")
         
         with col2:
-            st.write(f"**Ratio Riesgo/Recompensa:** {estrategia_seleccionada['ratioRR']}")
-            st.write(f"**Ganancia promedio:** {estrategia_seleccionada['beneficio']}%")
-            st.write(f"**Pérdida promedio:** {estrategia_seleccionada['stopLoss']}%")
-            st.write(f"**Tasa de éxito histórica:** {estrategia_seleccionada['probabilidad']}%")
+            if estrategia_seleccionada['avg_win'] > 0 and estrategia_seleccionada['avg_loss'] > 0:
+                ratio_rr = estrategia_seleccionada['avg_win'] / estrategia_seleccionada['avg_loss']
+                st.write(f"**Ratio Riesgo/Recompensa:** {ratio_rr:.2f}")
+            else:
+                st.write(f"**Ratio Riesgo/Recompensa:** N/A")
+            
+            st.write(f"**Ganancia promedio:** {estrategia_seleccionada['avg_win']:.2f}%")
+            st.write(f"**Pérdida promedio:** {estrategia_seleccionada['avg_loss']:.2f}%")
+            st.write(f"**Tasa de éxito:** {estrategia_seleccionada['win_rate']:.2f}%")
 
-        # Cálculos de análisis financiero
-        valor_esperado = calcular_valor_esperado(
-            estrategia_seleccionada['beneficio'],
-            estrategia_seleccionada['stopLoss'],
-            estrategia_seleccionada['probabilidad']
+        # === MÉTRICAS PROFESIONALES DE FONDOS CUANTITATIVOS ===
+        st.markdown("#### 📊 Métricas de Riesgo Institucionales")
+        
+        # Fila 1: Métricas básicas
+        col1, col2, col3, col4 = st.columns(4)
+        
+        col1.metric(
+            "Valor Esperado", 
+            f"{estrategia_seleccionada['expected_value']:.3f}%",
+            delta="Rentable" if estrategia_seleccionada['expected_value'] > 0 else "No rentable"
+        )
+        
+        col2.metric(
+            "Total Operaciones", 
+            f"{estrategia_seleccionada['total_trades']}"
+        )
+        
+        col3.metric(
+            "Tasa de Éxito", 
+            f"{estrategia_seleccionada['win_rate']:.1f}%"
+        )
+        
+        col4.metric(
+            "Volatilidad", 
+            f"{estrategia_seleccionada['volatility']:.2f}%"
         )
 
-        punto_equilibrio = calcular_punto_equilibrio(
-            estrategia_seleccionada['beneficio'],
-            estrategia_seleccionada['stopLoss']
+        # Fila 2: Métricas de riesgo avanzadas
+        st.markdown("#### 🚨 Análisis de Riesgo de Cola (Tail Risk)")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        col1.metric(
+            "Max Drawdown", 
+            f"{estrategia_seleccionada['max_drawdown']:.2f}%",
+            delta="Crítico" if estrategia_seleccionada['max_drawdown'] < -15 else "Moderado" if estrategia_seleccionada['max_drawdown'] < -10 else "Bajo"
+        )
+        
+        col2.metric(
+            "VaR 95%", 
+            f"{estrategia_seleccionada['var_95']:.2f}%",
+            help="Pérdida máxima esperada el 95% del tiempo"
+        )
+        
+        col3.metric(
+            "VaR 99%", 
+            f"{estrategia_seleccionada['var_99']:.2f}%",
+            help="Pérdida máxima esperada el 99% del tiempo"
+        )
+        
+        col4.metric(
+            "CVaR 95%", 
+            f"{estrategia_seleccionada['cvar_95']:.2f}%",
+            help="Pérdida esperada en el peor 5% de casos"
         )
 
-        sharpe_ratio = calcular_sharpe_ratio(
-            valor_esperado / 100,  # Convertir a decimal
-            estrategia_seleccionada['volatilidad'] / 100
+        # Gráficos de análisis profesional
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Equity Curve
+            st.markdown("#### 📈 Curva de Capital")
+            fig_equity = go.Figure()
+            dates_equity = df['Date'].iloc[-len(estrategia_seleccionada['equity_curve']):]
+            
+            fig_equity.add_trace(go.Scatter(
+                x=dates_equity,
+                y=estrategia_seleccionada['equity_curve'],
+                mode='lines',
+                name='Capital',
+                line=dict(color='blue', width=2)
+            ))
+            
+            fig_equity.update_layout(
+                title="Evolución del Capital (Base 100)",
+                xaxis_title="Fecha",
+                yaxis_title="Capital",
+                height=400
+            )
+            st.plotly_chart(fig_equity, use_container_width=True)
+        
+        with col2:
+            # Drawdown Chart
+            st.markdown("#### 📉 Análisis de Drawdown")
+            fig_dd = go.Figure()
+            
+            if len(estrategia_seleccionada['drawdown_series']) > 0:
+                dates_dd = df['Date'].iloc[-len(estrategia_seleccionada['drawdown_series']):]
+                fig_dd.add_trace(go.Scatter(
+                    x=dates_dd,
+                    y=estrategia_seleccionada['drawdown_series'],
+                    mode='lines',
+                    fill='tonexty',
+                    name='Drawdown',
+                    line=dict(color='red'),
+                    fillcolor='rgba(255,0,0,0.3)'
+                ))
+            
+            fig_dd.update_layout(
+                title="Drawdown Histórico",
+                xaxis_title="Fecha", 
+                yaxis_title="Drawdown (%)",
+                height=400
+            )
+            st.plotly_chart(fig_dd, use_container_width=True)
+
+        # Distribución de retornos
+        st.markdown("#### 📊 Distribución de Retornos")
+        
+        fig_dist = go.Figure()
+        
+        # Histograma
+        fig_dist.add_trace(go.Histogram(
+            x=estrategia_seleccionada['strategy_returns'],
+            nbinsx=20,
+            name='Retornos',
+            opacity=0.7
+        ))
+        
+        # Líneas VaR
+        fig_dist.add_vline(
+            x=estrategia_seleccionada['var_95'], 
+            line_dash="dash", 
+            line_color="orange",
+            annotation_text=f"VaR 95%: {estrategia_seleccionada['var_95']:.2f}%"
         )
-
-        # Métricas principales
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Valor Esperado (%)", f"{valor_esperado:.2f}%", delta="Rentable" if valor_esperado > 0 else "No rentable")
-        col2.metric("Punto de Equilibrio (%)", f"{punto_equilibrio:.1f}%")
-        col3.metric("Sharpe Ratio", f"{sharpe_ratio:.3f}", delta="Bueno" if sharpe_ratio > 1 else "Regular" if sharpe_ratio > 0.5 else "Pobre")
-
-        # Análisis detallado en expander
-        with st.expander("📊 Ver Análisis Detallado de Riesgo"):
-            st.markdown("#### Análisis de Decisión Bajo Incertidumbre")
-            
-            # Tabla de escenarios
-            escenarios_data = {
-                "Escenario": ["Operación exitosa", "Operación fallida"],
-                "Probabilidad": [f"{estrategia_seleccionada['probabilidad']:.1f}%", f"{100-estrategia_seleccionada['probabilidad']:.1f}%"],
-                "Resultado": [f"+{estrategia_seleccionada['beneficio']:.2f}%", f"-{estrategia_seleccionada['stopLoss']:.2f}%"],
-                "Contribución al VE": [
-                    f"+{(estrategia_seleccionada['beneficio'] * estrategia_seleccionada['probabilidad'] / 100):.3f}%",
-                    f"-{(estrategia_seleccionada['stopLoss'] * (100-estrategia_seleccionada['probabilidad']) / 100):.3f}%"
-                ]
-            }
-            
-            df_escenarios = pd.DataFrame(escenarios_data)
-            st.table(df_escenarios)
-            
-            st.markdown("#### Fundamento de la Estrategia")
-            st.write(estrategia_seleccionada['fundamento'])
-            
-            st.markdown("#### Interpretación de Métricas")
-            
-            if valor_esperado > 0:
-                st.success(f"✅ **Valor Esperado Positivo**: {valor_esperado:.2f}% - La estrategia es matemáticamente rentable a largo plazo")
-            else:
-                st.error(f"❌ **Valor Esperado Negativo**: {valor_esperado:.2f}% - La estrategia no es rentable a largo plazo")
-            
-            if estrategia_seleccionada['probabilidad'] > punto_equilibrio:
-                ventaja = estrategia_seleccionada['probabilidad'] - punto_equilibrio
-                st.info(f"📈 **Ventaja Estadística**: {ventaja:.1f}% por encima del punto de equilibrio")
-            else:
-                desventaja = punto_equilibrio - estrategia_seleccionada['probabilidad']
-                st.warning(f"📉 **Desventaja Estadística**: {desventaja:.1f}% por debajo del punto de equilibrio")
-            
-            # Interpretación Sharpe Ratio
-            if sharpe_ratio > 2:
-                st.success(f"🏆 **Sharpe Ratio Excelente**: {sharpe_ratio:.3f} - Retorno muy superior al riesgo asumido")
-            elif sharpe_ratio > 1:
-                st.success(f"✅ **Sharpe Ratio Bueno**: {sharpe_ratio:.3f} - Retorno superior al riesgo")
-            elif sharpe_ratio > 0.5:
-                st.warning(f"⚖️ **Sharpe Ratio Regular**: {sharpe_ratio:.3f} - Retorno moderado vs riesgo")
-            else:
-                st.error(f"❌ **Sharpe Ratio Pobre**: {sharpe_ratio:.3f} - Retorno insuficiente para el riesgo")
+        
+        fig_dist.add_vline(
+            x=estrategia_seleccionada['var_99'], 
+            line_dash="dash", 
+            line_color="red",
+            annotation_text=f"VaR 99%: {estrategia_seleccionada['var_99']:.2f}%"
+        )
+        
+        fig_dist.update_layout(
+            title="Distribución de Retornos de la Estrategia",
+            xaxis_title="Retorno (%)",
+            yaxis_title="Frecuencia",
+            height=400
+        )
+        st.plotly_chart(fig_dist, use_container_width=True)
 
         # Contexto del mercado financiero
         with st.expander("🏦 Ver Contexto del Mercado y Participantes"):
@@ -1017,100 +1227,101 @@ if st.session_state.current_page == "principal":
         st.dataframe(df_estrategias, use_container_width=True)
 
     else:
-        st.info("📊 Dashboard de Análisis Financiero")
+        st.info("📊 Dashboard de Análisis Cuantitativo Profesional")
         st.markdown("""
-        **Este dashboard incluye:**
-        - 📈 Gráficos de precio y volatilidad
-        - 📊 Estadísticas de rendimiento  
-        - 🔄 Análisis de rachas consecutivas
-        - 🎯 Estrategias de trading cuantitativas
-        - 📈 Análisis de riesgo y valor esperado
+        **Este dashboard incluye métricas de fondos de inversión reales:**
+        - 📈 **VaR & CVaR**: Value at Risk y Conditional VaR (Expected Shortfall)
+        - 📉 **Maximum Drawdown**: Mayor caída peak-to-valley histórica
+        - 📊 **Análisis de distribución**: Skewness, kurtosis, fat tails
+        - 🔄 **Backtesting riguroso**: Basado en datos históricos reales
+        - ⚖️ **Gestión de riesgo institucional**: Métricas usadas por hedge funds
         
         **👈 Use el panel lateral para cargar datos y comenzar el análisis**
         """)
         
         st.markdown("---")
-        st.markdown("### 🎯 Estrategias Disponibles")
+        st.markdown("### 🎯 Métricas Institucionales Disponibles")
         
-        estrategias_info = pd.DataFrame([
+        metrics_info = pd.DataFrame([
             {
-                "Estrategia": "Viernes Alcista", 
-                "Tipo": "Sesgo calendario", 
-                "Dirección": "LONG", 
-                "Ratio R/R": "2.14", 
-                "Tasa Éxito": "59.32%",
-                "Valor Esperado": "+0.52%"
+                "Métrica": "Value at Risk (VaR)", 
+                "Descripción": "Pérdida máxima esperada con 95%/99% confianza",
+                "Uso": "Límites diarios de riesgo", 
+                "Interpretación": "VaR 95% = -2.5% → 95% del tiempo pérdidas ≤ 2.5%"
             },
             {
-                "Estrategia": "Miércoles Alcista", 
-                "Tipo": "Sesgo calendario", 
-                "Dirección": "LONG", 
-                "Ratio R/R": "1.92", 
-                "Tasa Éxito": "57.97%",
-                "Valor Esperado": "+0.33%"
+                "Métrica": "Conditional VaR (CVaR)", 
+                "Descripción": "Pérdida promedio en el peor 5%/1% de casos",
+                "Uso": "Análisis de tail risk", 
+                "Interpretación": "CVaR >> VaR indica fat tails peligrosos"
             },
             {
-                "Estrategia": "Fade the Gap", 
-                "Tipo": "Reversión a la media", 
-                "Dirección": "SHORT", 
-                "Ratio R/R": "2.04", 
-                "Tasa Éxito": "47.46%",
-                "Valor Esperado": "-0.13%"
+                "Métrica": "Maximum Drawdown", 
+                "Descripción": "Mayor caída peak-to-valley histórica",
+                "Uso": "Límites institucionales", 
+                "Interpretación": "> 20% = Inaceptable para pensiones"
             },
             {
-                "Estrategia": "Gap y Go", 
-                "Tipo": "Momentum/Rebounds", 
-                "Dirección": "LONG", 
-                "Ratio R/R": "2.07", 
-                "Tasa Éxito": "49.55%",
-                "Valor Esperado": "+0.32%"
+                "Métrica": "Valor Esperado", 
+                "Descripción": "Retorno promedio ponderado por probabilidad",
+                "Uso": "Rentabilidad a largo plazo", 
+                "Interpretación": "Debe ser > 0 para ser viable"
             },
         ])
         
-        st.dataframe(estrategias_info, use_container_width=True)
+        st.dataframe(metrics_info, use_container_width=True)
         
         st.markdown("---")
-        st.markdown("### 📚 Fundamentos Financieros")
+        st.markdown("### 📚 Diferencias vs Análisis Retail")
         
-        with st.expander("🔍 ¿Qué es el Valor Esperado?"):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("#### 🏪 Análisis Retail Típico")
             st.markdown("""
-            **Valor Esperado (VE)** = (Ganancia × P(éxito)) - (Pérdida × P(fallo))
-            
-            - **VE > 0**: Estrategia matemáticamente rentable
-            - **VE = 0**: Estrategia neutra (break-even)
-            - **VE < 0**: Estrategia no rentable a largo plazo
-            
-            **Ejemplo**: Si ganas $100 el 60% de las veces y pierdes $50 el 40%:
-            VE = ($100 × 0.6) - ($50 × 0.4) = $60 - $20 = **+$40**
+            - ✅ Win rate (tasa de éxito)
+            - ✅ Ratio riesgo/recompensa  
+            - ✅ Profit factor
+            - ❌ Sin análisis de tail risk
+            - ❌ Sin stress testing
+            - ❌ Backtesting simplificado
             """)
         
-        with st.expander("⚖️ ¿Qué es el Punto de Equilibrio?"):
+        with col2:
+            st.markdown("#### 🏦 Análisis Institucional")
             st.markdown("""
-            **Punto de Equilibrio** = Pérdida / (Ganancia + Pérdida) × 100
-            
-            Es la **tasa mínima de éxito** necesaria para no perder dinero.
-            
-            - Si tu tasa histórica > punto equilibrio → **Ventaja estadística**
-            - Si tu tasa histórica < punto equilibrio → **Desventaja estadística**
-            
-            **Ejemplo**: Ganas $200, pierdes $100
-            PE = $100 / ($200 + $100) × 100 = **33.3%**
-            Necesitas ganar mínimo 33.3% de las veces para ser rentable.
+            - ✅ VaR & CVaR (tail risk)
+            - ✅ Maximum Drawdown
+            - ✅ Análisis de distribución completo
+            - ✅ Stress testing multi-escenario
+            - ✅ Régimen-aware backtesting
+            - ✅ Factor exposure analysis
             """)
         
-        with st.expander("📊 ¿Qué es el Sharpe Ratio?"):
+        st.markdown("---")
+        st.markdown("### 🎓 ¿Por qué usar métricas institucionales?")
+        
+        with st.expander("🔍 Ventajas del enfoque profesional"):
             st.markdown("""
-            **Sharpe Ratio** = (Retorno - Tasa libre riesgo) / Volatilidad
+            **1. Gestión de riesgo superior:**
+            - VaR te dice cuánto puedes perder en condiciones normales
+            - CVaR te prepara para crisis (2008, COVID, etc.)
+            - Drawdown determina si puedes psicológicamente soportar la estrategia
             
-            Mide el **retorno por unidad de riesgo**:
+            **2. Credibilidad institucional:**
+            - Mismas métricas que usan BlackRock, Citadel, Renaissance
+            - Preparación para capital institucional
+            - Estándares regulatorios (Basel III, etc.)
             
-            - **> 2.0**: Excelente
-            - **1.0 - 2.0**: Bueno  
-            - **0.5 - 1.0**: Aceptable
-            - **< 0.5**: Pobre
+            **3. Decisiones más informadas:**
+            - No solo "¿gano dinero?" sino "¿cuánto riesgo asumo?"
+            - Comparación objetiva entre estrategias
+            - Identificación de regímenes peligrosos
             
-            Una estrategia con Sharpe de 1.5 es mejor que otra con 0.8, 
-            aunque ambas sean rentables.
+            **4. Escalabilidad:**
+            - Estrategias que funcionan con $10K también con $10M
+            - Límites de capacidad claros
+            - Gestión de impacto de mercado
             """)
         
 
