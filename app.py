@@ -462,7 +462,18 @@ def analyze_support_resistance(df):
 # Interfaz de usuario para carga de datos (siempre visible en ambas páginas)
 st.sidebar.header("⚙️ Configuración de Datos")
 
-tickers_disponibles = ["ALAB", "SAP", "AMZN", "TSLA", "BABA", "PANW", "SPY", "AMD", "GTLB", "CRM"]
+tickers_disponibles = [
+    # Portfolio ACCIONES Y ETF
+    "ALAB", "SAP", "AMZN", "TSLA", "BABA", "PANW", "SPY", "AMD", "GTLB", "CRM", "EDIT","META",
+    
+    # Portfolio PROTECT 2
+    "SLV", "GLD", "SVM", "BTC-USD",
+    
+    # Portfolio de Crypto (formato Yahoo Finance)
+    "ZIL-USD", "STX4847-USD", "BEAM28298-USD", "LTC-USD", "VRA-USD", "MANA-USD", 
+    "SOL-USD", "AVAX-USD", "RVN-USD", "TON11419-USD", "DOT-USD", "ETH-USD", 
+    "ENA-USD", "LINK-USD", "FLUX-USD", "ZANO-USD", "ADA-USD",
+    ]
 ticker_seleccionado = st.sidebar.selectbox("Seleccione una acción", tickers_disponibles,
                                    index=tickers_disponibles.index(st.session_state.get('ticker_seleccionado', 'ALAB')),
                                    key="ticker_principal")
@@ -588,6 +599,38 @@ if st.sidebar.button("🔄 Actualizar Datos", type="primary"):
         else:
             st.sidebar.error(f"❌ No se encontraron datos válidos para {ticker_seleccionado.upper()}")
 
+# === FUNCIÓN PARA PREPARAR DATOS DE DESCARGA ===
+def prepare_download_data():
+    """Prepara los datos para descarga en CSV"""
+    if st.session_state.df_con_rendimiento is None:
+        return None
+    
+    df_download = st.session_state.df_con_rendimiento.copy()
+    
+    # Formatear fecha para CSV
+    df_download['Date'] = df_download['Date'].dt.strftime('%Y-%m-%d')
+    
+    # Redondear valores numéricos
+    numeric_columns = ['Open', 'High', 'Low', 'Close', 'Volume', 'Rendimiento', 'Rango']
+    for col in numeric_columns:
+        if col in df_download.columns:
+            df_download[col] = df_download[col].round(4)
+    
+    # Agregar información adicional si existe
+    if 'ATR14' in df_download.columns:
+        df_download['ATR14'] = df_download['ATR14'].round(4)
+    
+    if 'Volatilidad' in df_download.columns:
+        df_download['Volatilidad_Categoria'] = df_download['Volatilidad']
+    
+    # Reordenar columnas
+    column_order = ['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Rendimiento', 'Subida', 'Rango']
+    available_columns = [col for col in column_order if col in df_download.columns]
+    other_columns = [col for col in df_download.columns if col not in available_columns]
+    final_columns = available_columns + other_columns
+    
+    return df_download[final_columns]
+
 # Mostrar estado actual en sidebar
 if st.session_state.df_con_rendimiento is not None:
     st.sidebar.success(f"📊 Datos cargados: {st.session_state.ticker_seleccionado.upper()}")
@@ -596,6 +639,47 @@ if st.session_state.df_con_rendimiento is not None:
     total_days = len(st.session_state.df_con_rendimiento)
     st.sidebar.info(f"📅 Período: {first_date} a {last_date}")
     st.sidebar.info(f"📊 Total de días: {total_days}")
+    
+    # === BOTÓN DE DESCARGA ===
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📥 Descargar Datos")
+    
+    # Preparar datos para descarga
+    download_data = prepare_download_data()
+    
+    if download_data is not None:
+        # Convertir a CSV
+        csv_data = download_data.to_csv(index=False, encoding='utf-8')
+        
+        # Nombre del archivo
+        filename = f"{st.session_state.ticker_seleccionado}_{first_date}_to_{last_date}.csv"
+        
+        # Botón de descarga principal
+        st.sidebar.download_button(
+            label="📊 Descargar Datos Completos",
+            data=csv_data,
+            file_name=filename,
+            mime="text/csv",
+            help="Descarga todos los datos históricos con indicadores calculados"
+        )
+        
+        # Información adicional sobre la descarga
+        with st.sidebar.expander("ℹ️ Información de Descarga"):
+            st.write("**El archivo CSV incluye:**")
+            st.write("• Datos OHLCV básicos")
+            st.write("• Rendimientos diarios calculados")
+            st.write("• Indicadores técnicos (ATR, rangos)")
+            st.write("• Clasificaciones de volatilidad")
+            st.write("• Fechas en formato YYYY-MM-DD")
+            st.write(f"• **Total de registros:** {len(download_data)}")
+            
+            # Mostrar preview de las columnas
+            st.write("**Columnas incluidas:**")
+            columns_preview = ", ".join(download_data.columns[:8])
+            if len(download_data.columns) > 8:
+                columns_preview += f"... (+{len(download_data.columns)-8} más)"
+            st.write(columns_preview)
+    
 else:
     st.sidebar.warning("⚠️ Sin datos - Haga clic en 'Actualizar Datos'")
 
@@ -795,226 +879,97 @@ if st.session_state.current_page == "principal":
 
             # Detalles de rachas en expander
             with st.expander("📊 Ver Detalles de Rachas"):
-                st.dataframe(rachas[['Días', 'Tipo']].rename(columns={'Días': 'Días consecutivos'}), use_container_width=True)
-
-        # === SECCIÓN DE ANÁLISIS DE ESTRATEGIAS FINANCIERAS ===
-        st.markdown("---")
-        st.markdown("## Estrategias de Trading Basadas en Datos Históricos")
-        st.markdown("### Análisis de Decisión Bajo Incertidumbre")
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.dataframe(rachas[['Días', 'Tipo']].rename(columns={'Días': 'Días consecutivos'}), use_container_width=True)
+                with col2:
+                    rachas_csv = rachas[['Días', 'Tipo']].to_csv(index=False, encoding='utf-8')
+                    st.download_button(
+                        label="📥 CSV Rachas",
+                        data=rachas_csv,
+                        file_name=f"rachas_consecutivas_{st.session_state.ticker_seleccionado}.csv",
+                        mime="text/csv",
+                        help="Descargar análisis de rachas consecutivas"
+                    )
         
-        st.info("💡 Para análisis avanzado de patrones, visite la pestaña '🔍 Patrones Identificados'")
-
-        def calcular_valor_esperado(beneficio, stop_loss, probabilidad):
-            return round((beneficio * probabilidad / 100) - (stop_loss * (100 - probabilidad) / 100), 2)
-
-        def calcular_punto_equilibrio(beneficio, stop_loss):
-            if beneficio + stop_loss == 0:
-                return 0
-            return round((stop_loss / (beneficio + stop_loss)) * 100, 1)
-
-        def calcular_sharpe_ratio(rendimiento, volatilidad):
-            # Asumiendo tasa libre de riesgo del 4% anual
-            tasa_libre_riesgo = 4.0 / 252  # Diaria
-            if volatilidad == 0:
-                return 0
-            return round((rendimiento - tasa_libre_riesgo) / volatilidad, 3)
-
-        # Estrategias basadas en análisis estadístico
-        estrategias = [
-            {
-                "nombre": "Viernes Alcista",
-                "descripcion": f"Entrada en viernes con cierre alcista para {st.session_state.ticker_seleccionado.upper()}",
-                "direccion": "LONG (compra)",
-                "tipo_estrategia": "Sesgo calendario (Friday Effect)",
-                "ratioRR": 2.14,
-                "beneficio": 1.29,
-                "stopLoss": 0.60,
-                "probabilidad": 59.32,
-                "volatilidad": 2.8,
-                "fundamento": "Sesgo de calendario: tendencia estadística de cierres al alza en viernes por cerrar posiciones cortas."
-            },
-            {
-                "nombre": "Miércoles Alcista", 
-                "descripcion": f"Entrada en miércoles con cierre alcista para {st.session_state.ticker_seleccionado.upper()}",
-                "direccion": "LONG (compra)",
-                "tipo_estrategia": "Sesgo calendario (Mid-week Effect)",
-                "ratioRR": 1.92,
-                "beneficio": 1.22,
-                "stopLoss": 0.64,
-                "probabilidad": 57.97,
-                "volatilidad": 2.6,
-                "mejorDia": "Miércoles (59.62% de reversión)",
-                "fundamento": "Efecto mid-week: reversión a la media después de movimientos fuertes de inicio de semana."
-            },
-            {
-                "nombre": "Fade the Gap",
-                "descripcion": f"Entrada al detectar gap alcista significativo (>0.5%) para {st.session_state.ticker_seleccionado.upper()}",
-                "direccion": "SHORT (venta)",
-                "tipo_estrategia": "Reversión a la media",
-                "ratioRR": 2.04,
-                "beneficio": 1.34,
-                "stopLoss": 0.66,
-                "probabilidad": 47.46,
-                "volatilidad": 3.2,
-                "fundamento": "Ineficiencias de apertura: gaps extremos tienden a corregirse en las primeras horas."
-            },
-            {
-                "nombre": "Gap y Go",
-                "descripcion": f"Entrada al detectar gap bajista significativo (<-0.5%) para {st.session_state.ticker_seleccionado.upper()}",
-                "direccion": "LONG (compra)",
-                "tipo_estrategia": "Momentum/Rebounds",
-                "ratioRR": 2.07,
-                "beneficio": 1.27,
-                "stopLoss": 0.61,
-                "probabilidad": 49.55,
-                "volatilidad": 3.0,
-                "mejorDia": "Viernes (56.10% de rebote)",
-                "fundamento": "Oversold rebounds: gaps bajistas extremos generan oportunidades de rebote técnico."
-            }
-        ]
-
-        # Selector de estrategia
-        estrategia_nombre = st.selectbox("Seleccione una estrategia", [e["nombre"] for e in estrategias], key="estrategia_principal")
-        estrategia_seleccionada = next(e for e in estrategias if e["nombre"] == estrategia_nombre)
-
-        # Mostrar detalles de la estrategia
-        col1, col2 = st.columns(2)
+        # === SECCIÓN DE DESCARGA COMPLETA ===
+        st.markdown("---")
+        st.markdown("### 📥 Descargar Análisis Completo")
+        
+        col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.markdown(f"**📋 {estrategia_seleccionada['nombre']}**")
-            st.write(f"**Descripción:** {estrategia_seleccionada['descripcion']}")
-            st.write(f"**Dirección:** {estrategia_seleccionada['direccion']}")
-            st.write(f"**Tipo:** {estrategia_seleccionada['tipo_estrategia']}")
-            if "mejorDia" in estrategia_seleccionada:
-                st.write(f"**Mejor momento:** {estrategia_seleccionada['mejorDia']}")
+            # Datos básicos con indicadores
+            download_data = prepare_download_data()
+            if download_data is not None:
+                csv_data = download_data.to_csv(index=False, encoding='utf-8')
+                st.download_button(
+                    label="📊 Datos + Indicadores",
+                    data=csv_data,
+                    file_name=f"completo_{st.session_state.ticker_seleccionado}_{first_date}_to_{last_date}.csv",
+                    mime="text/csv",
+                    help="Todos los datos históricos con indicadores técnicos calculados",
+                    use_container_width=True
+                )
         
         with col2:
-            st.write(f"**Ratio Riesgo/Recompensa:** {estrategia_seleccionada['ratioRR']}")
-            st.write(f"**Ganancia promedio:** {estrategia_seleccionada['beneficio']}%")
-            st.write(f"**Pérdida promedio:** {estrategia_seleccionada['stopLoss']}%")
-            st.write(f"**Tasa de éxito histórica:** {estrategia_seleccionada['probabilidad']}%")
-
-        # Cálculos de análisis financiero
-        valor_esperado = calcular_valor_esperado(
-            estrategia_seleccionada['beneficio'],
-            estrategia_seleccionada['stopLoss'],
-            estrategia_seleccionada['probabilidad']
-        )
-
-        punto_equilibrio = calcular_punto_equilibrio(
-            estrategia_seleccionada['beneficio'],
-            estrategia_seleccionada['stopLoss']
-        )
-
-        sharpe_ratio = calcular_sharpe_ratio(
-            valor_esperado / 100,  # Convertir a decimal
-            estrategia_seleccionada['volatilidad'] / 100
-        )
-
-        # Métricas principales
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Valor Esperado (%)", f"{valor_esperado:.2f}%", delta="Rentable" if valor_esperado > 0 else "No rentable")
-        col2.metric("Punto de Equilibrio (%)", f"{punto_equilibrio:.1f}%")
-        col3.metric("Sharpe Ratio", f"{sharpe_ratio:.3f}", delta="Bueno" if sharpe_ratio > 1 else "Regular" if sharpe_ratio > 0.5 else "Pobre")
-
-        # Análisis detallado en expander
-        with st.expander("📊 Ver Análisis Detallado de Riesgo"):
-            st.markdown("#### Análisis de Decisión Bajo Incertidumbre")
-            
-            # Tabla de escenarios
-            escenarios_data = {
-                "Escenario": ["Operación exitosa", "Operación fallida"],
-                "Probabilidad": [f"{estrategia_seleccionada['probabilidad']:.1f}%", f"{100-estrategia_seleccionada['probabilidad']:.1f}%"],
-                "Resultado": [f"+{estrategia_seleccionada['beneficio']:.2f}%", f"-{estrategia_seleccionada['stopLoss']:.2f}%"],
-                "Contribución al VE": [
-                    f"+{(estrategia_seleccionada['beneficio'] * estrategia_seleccionada['probabilidad'] / 100):.3f}%",
-                    f"-{(estrategia_seleccionada['stopLoss'] * (100-estrategia_seleccionada['probabilidad']) / 100):.3f}%"
+            # Solo estadísticas resumen
+            stats_data = {
+                'Métrica': ['Promedio', 'Mediana', 'Desv_Estándar', 'Corrección_Alza', 'Corrección_Baja', 'Corrección_Total'],
+                'Valor_%': [
+                    round(promedio, 4),
+                    round(mediana, 4),
+                    round(desviacion, 4),
+                    round(promedio_correccion_al_alza, 4),
+                    round(promedio_correccion_a_la_baja, 4),
+                    round(promedio_correccion_total, 4)
                 ]
             }
+            stats_df = pd.DataFrame(stats_data)
+            stats_csv = stats_df.to_csv(index=False, encoding='utf-8')
             
-            df_escenarios = pd.DataFrame(escenarios_data)
-            st.table(df_escenarios)
-            
-            st.markdown("#### Fundamento de la Estrategia")
-            st.write(estrategia_seleccionada['fundamento'])
-            
-            st.markdown("#### Interpretación de Métricas")
-            
-            if valor_esperado > 0:
-                st.success(f"✅ **Valor Esperado Positivo**: {valor_esperado:.2f}% - La estrategia es matemáticamente rentable a largo plazo")
-            else:
-                st.error(f"❌ **Valor Esperado Negativo**: {valor_esperado:.2f}% - La estrategia no es rentable a largo plazo")
-            
-            if estrategia_seleccionada['probabilidad'] > punto_equilibrio:
-                ventaja = estrategia_seleccionada['probabilidad'] - punto_equilibrio
-                st.info(f"📈 **Ventaja Estadística**: {ventaja:.1f}% por encima del punto de equilibrio")
-            else:
-                desventaja = punto_equilibrio - estrategia_seleccionada['probabilidad']
-                st.warning(f"📉 **Desventaja Estadística**: {desventaja:.1f}% por debajo del punto de equilibrio")
-            
-            # Interpretación Sharpe Ratio
-            if sharpe_ratio > 2:
-                st.success(f"🏆 **Sharpe Ratio Excelente**: {sharpe_ratio:.3f} - Retorno muy superior al riesgo asumido")
-            elif sharpe_ratio > 1:
-                st.success(f"✅ **Sharpe Ratio Bueno**: {sharpe_ratio:.3f} - Retorno superior al riesgo")
-            elif sharpe_ratio > 0.5:
-                st.warning(f"⚖️ **Sharpe Ratio Regular**: {sharpe_ratio:.3f} - Retorno moderado vs riesgo")
-            else:
-                st.error(f"❌ **Sharpe Ratio Pobre**: {sharpe_ratio:.3f} - Retorno insuficiente para el riesgo")
-
-        # Contexto del mercado financiero
-        with st.expander("🏦 Ver Contexto del Mercado y Participantes"):
-            st.markdown("#### Estructura del Mercado")
-            st.markdown("""
-            | Tipo de Participante | Estimación % | Comportamiento Típico |
-            |---------------------|--------------|----------------------|
-            | Fondos institucionales | 70-75% | Estrategias algorítmicas de largo plazo |
-            | Market Makers | 10-15% | Provisión de liquidez, arbitraje |
-            | Hedge Funds | 5-8% | Estrategias especializadas, alta frecuencia |
-            | Traders retail | 3-5% | Estrategias técnicas, trading direccional |
-            | Inversores pasivos | 2-3% | Buy & hold, indexados |
-            """)
-
-            st.markdown("#### 📊 Dinámicas del Mercado")
-            st.markdown(f"""
-            - **Ineficiencias temporales**: Los sesgos de calendario persisten debido a comportamientos institucionales (ej: rebalanceos trimestrales)
-            - **Flujos de órdenes**: Los viernes experimentan mayor volumen por cerrar posiciones antes del fin de semana
-            - **Gaps de apertura**: Resultado de información overnight y diferencias de valoración entre sesiones
-            - **Correlación sectorial**: {st.session_state.ticker_seleccionado} se comporta según las dinámicas de su sector e índices de referencia
-            - **Volumen y liquidez**: Afectan la efectividad de las estrategias (mayor volumen = menor impacto de precio)
-            """)
-            
-            st.markdown("#### ⚠️ Limitaciones y Advertencias")
-            st.markdown("""
-            - **Datos históricos**: El rendimiento pasado no garantiza resultados futuros
-            - **Cambios de régimen**: Las ineficiencias pueden desaparecer si son explotadas masivamente
-            - **Costos de transacción**: No incluidos en el análisis (comisiones, slippage, spreads)
-            - **Tamaño de posición**: Las estrategias pueden no escalar para volúmenes grandes
-            - **Factores externos**: Crisis, noticias, eventos macroeconómicos pueden invalidar patrones históricos
-            """)
+            st.download_button(
+                label="📈 Solo Estadísticas",
+                data=stats_csv,
+                file_name=f"estadisticas_{st.session_state.ticker_seleccionado}.csv",
+                mime="text/csv",
+                help="Resumen estadístico del análisis",
+                use_container_width=True
+            )
         
-        st.markdown("---")
-        st.markdown("### 📈 Estrategias Disponibles - Resumen")
-        
-        # Tabla comparativa de estrategias
-        estrategias_tabla = []
-        for estrategia in estrategias:
-            ve = calcular_valor_esperado(estrategia['beneficio'], estrategia['stopLoss'], estrategia['probabilidad'])
-            pe = calcular_punto_equilibrio(estrategia['beneficio'], estrategia['stopLoss'])
-            sharpe = calcular_sharpe_ratio(ve / 100, estrategia['volatilidad'] / 100)
+        with col3:
+            # Top días (mejores y peores)
+            top_data = []
             
-            estrategias_tabla.append({
-                "Estrategia": estrategia['nombre'],
-                "Dirección": estrategia['direccion'].split()[0],  # Solo LONG/SHORT
-                "Tasa Éxito (%)": f"{estrategia['probabilidad']:.1f}%",
-                "Ratio R/R": estrategia['ratioRR'],
-                "Valor Esperado (%)": f"{ve:.2f}%",
-                "Sharpe Ratio": f"{sharpe:.3f}",
-                "Tipo": estrategia['tipo_estrategia']
-            })
-        
-        df_estrategias = pd.DataFrame(estrategias_tabla)
-        st.dataframe(df_estrategias, use_container_width=True)
+            # Mejores días
+            for _, row in top_5_mayor.iterrows():
+                top_data.append({
+                    'Fecha': row['Date'].strftime('%Y-%m-%d'),
+                    'Tipo': 'Mejor',
+                    'Rendimiento_%': round(row['Rendimiento'], 4),
+                    'Precio_Close': round(row['Close'], 2)
+                })
+            
+            # Peores días
+            for _, row in top_5_menor.iterrows():
+                top_data.append({
+                    'Fecha': row['Date'].strftime('%Y-%m-%d'),
+                    'Tipo': 'Peor',
+                    'Rendimiento_%': round(row['Rendimiento'], 4),
+                    'Precio_Close': round(row['Close'], 2)
+                })
+            
+            top_df = pd.DataFrame(top_data)
+            top_csv = top_df.to_csv(index=False, encoding='utf-8')
+            
+            st.download_button(
+                label="🏆 Top Días",
+                data=top_csv,
+                file_name=f"top_dias_{st.session_state.ticker_seleccionado}.csv",
+                mime="text/csv",
+                help="Top 5 mejores y peores días de rendimiento",
+                use_container_width=True
+            )
 
     else:
         st.info("📊 Dashboard de Análisis Financiero")
@@ -1023,96 +978,11 @@ if st.session_state.current_page == "principal":
         - 📈 Gráficos de precio y volatilidad
         - 📊 Estadísticas de rendimiento  
         - 🔄 Análisis de rachas consecutivas
-        - 🎯 Estrategias de trading cuantitativas
-        - 📈 Análisis de riesgo y valor esperado
+        - 📊 Clasificación de volatilidad diaria
+        - 📈 Análisis técnico básico (ATR, rangos)
         
         **👈 Use el panel lateral para cargar datos y comenzar el análisis**
         """)
-        
-        st.markdown("---")
-        st.markdown("### 🎯 Estrategias Disponibles")
-        
-        estrategias_info = pd.DataFrame([
-            {
-                "Estrategia": "Viernes Alcista", 
-                "Tipo": "Sesgo calendario", 
-                "Dirección": "LONG", 
-                "Ratio R/R": "2.14", 
-                "Tasa Éxito": "59.32%",
-                "Valor Esperado": "+0.52%"
-            },
-            {
-                "Estrategia": "Miércoles Alcista", 
-                "Tipo": "Sesgo calendario", 
-                "Dirección": "LONG", 
-                "Ratio R/R": "1.92", 
-                "Tasa Éxito": "57.97%",
-                "Valor Esperado": "+0.33%"
-            },
-            {
-                "Estrategia": "Fade the Gap", 
-                "Tipo": "Reversión a la media", 
-                "Dirección": "SHORT", 
-                "Ratio R/R": "2.04", 
-                "Tasa Éxito": "47.46%",
-                "Valor Esperado": "-0.13%"
-            },
-            {
-                "Estrategia": "Gap y Go", 
-                "Tipo": "Momentum/Rebounds", 
-                "Dirección": "LONG", 
-                "Ratio R/R": "2.07", 
-                "Tasa Éxito": "49.55%",
-                "Valor Esperado": "+0.32%"
-            },
-        ])
-        
-        st.dataframe(estrategias_info, use_container_width=True)
-        
-        st.markdown("---")
-        st.markdown("### 📚 Fundamentos Financieros")
-        
-        with st.expander("🔍 ¿Qué es el Valor Esperado?"):
-            st.markdown("""
-            **Valor Esperado (VE)** = (Ganancia × P(éxito)) - (Pérdida × P(fallo))
-            
-            - **VE > 0**: Estrategia matemáticamente rentable
-            - **VE = 0**: Estrategia neutra (break-even)
-            - **VE < 0**: Estrategia no rentable a largo plazo
-            
-            **Ejemplo**: Si ganas $100 el 60% de las veces y pierdes $50 el 40%:
-            VE = ($100 × 0.6) - ($50 × 0.4) = $60 - $20 = **+$40**
-            """)
-        
-        with st.expander("⚖️ ¿Qué es el Punto de Equilibrio?"):
-            st.markdown("""
-            **Punto de Equilibrio** = Pérdida / (Ganancia + Pérdida) × 100
-            
-            Es la **tasa mínima de éxito** necesaria para no perder dinero.
-            
-            - Si tu tasa histórica > punto equilibrio → **Ventaja estadística**
-            - Si tu tasa histórica < punto equilibrio → **Desventaja estadística**
-            
-            **Ejemplo**: Ganas $200, pierdes $100
-            PE = $100 / ($200 + $100) × 100 = **33.3%**
-            Necesitas ganar mínimo 33.3% de las veces para ser rentable.
-            """)
-        
-        with st.expander("📊 ¿Qué es el Sharpe Ratio?"):
-            st.markdown("""
-            **Sharpe Ratio** = (Retorno - Tasa libre riesgo) / Volatilidad
-            
-            Mide el **retorno por unidad de riesgo**:
-            
-            - **> 2.0**: Excelente
-            - **1.0 - 2.0**: Bueno  
-            - **0.5 - 1.0**: Aceptable
-            - **< 0.5**: Pobre
-            
-            Una estrategia con Sharpe de 1.5 es mejor que otra con 0.8, 
-            aunque ambas sean rentables.
-            """)
-        
 
 # === PÁGINA DE PATRONES IDENTIFICADOS ===
 elif st.session_state.current_page == "patrones":
@@ -1187,6 +1057,18 @@ elif st.session_state.current_page == "patrones":
                 regime_returns_display = regime_returns.round(2)
                 st.dataframe(regime_returns_display)
                 
+                # Botón de descarga para análisis de volatilidad
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    vol_csv = regime_returns_display.to_csv(encoding='utf-8')
+                    st.download_button(
+                        label="📥 CSV",
+                        data=vol_csv,
+                        file_name=f"volatilidad_analysis_{st.session_state.ticker_seleccionado}.csv",
+                        mime="text/csv",
+                        help="Descargar análisis de volatilidad"
+                    )
+                
                 # Interpretación
                 st.markdown("#### 💡 Interpretación:")
                 if current_regime == 'Baja':
@@ -1238,6 +1120,18 @@ elif st.session_state.current_page == "patrones":
                 daily_display['Tasa_Exito'] = (daily_display['Tasa_Exito'] * 100).round(1)
                 st.dataframe(daily_display, use_container_width=True)
                 
+                # Botón de descarga para patrones temporales
+                col1, col2 = st.columns([3, 1])
+                with col2:
+                    temporal_csv = daily_display.to_csv(encoding='utf-8')
+                    st.download_button(
+                        label="📥 CSV Diario",
+                        data=temporal_csv,
+                        file_name=f"patrones_temporales_diario_{st.session_state.ticker_seleccionado}.csv",
+                        mime="text/csv",
+                        help="Descargar análisis por día de la semana"
+                    )
+                
                 # Análisis mensual
                 st.markdown("#### 📅 Rendimientos por Mes")
                 monthly_stats = temporal_analysis['monthly_stats']
@@ -1251,6 +1145,25 @@ elif st.session_state.current_page == "patrones":
                     color_continuous_scale='RdYlGn'
                 )
                 st.plotly_chart(fig_monthly, use_container_width=True)
+                
+                # Mostrar tabla mensual y botón de descarga
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    monthly_display = monthly_stats.copy()
+                    monthly_display['Promedio'] = (monthly_display['Promedio'] * 100).round(2)
+                    monthly_display['Volatilidad'] = (monthly_display['Volatilidad'] * 100).round(2)
+                    monthly_display['Tasa_Exito'] = (monthly_display['Tasa_Exito'] * 100).round(1)
+                    st.dataframe(monthly_display, use_container_width=True)
+                
+                with col2:
+                    monthly_csv = monthly_display.to_csv(encoding='utf-8')
+                    st.download_button(
+                        label="📥 CSV Mensual",
+                        data=monthly_csv,
+                        file_name=f"patrones_temporales_mensual_{st.session_state.ticker_seleccionado}.csv",
+                        mime="text/csv",
+                        help="Descargar análisis por mes"
+                    )
                 
                 # Efecto "Sell in May"
                 st.markdown("#### 🌸 Efecto 'Sell in May'")
@@ -1323,6 +1236,18 @@ elif st.session_state.current_page == "patrones":
                     # Tabla de quintiles
                     st.dataframe(quintile_data.round(2), use_container_width=True)
                     
+                    # Botón de descarga para análisis de momentum
+                    col1, col2 = st.columns([3, 1])
+                    with col2:
+                        momentum_csv = quintile_data.round(2).to_csv(encoding='utf-8')
+                        st.download_button(
+                            label="📥 CSV",
+                            data=momentum_csv,
+                            file_name=f"momentum_{period_selected}d_{st.session_state.ticker_seleccionado}.csv",
+                            mime="text/csv",
+                            help=f"Descargar análisis de momentum {period_selected} días"
+                        )
+                    
                     # Interpretación
                     momentum_strength = momentum_analysis[period_selected]['spread']
                     correlation_strength = momentum_analysis[period_selected]['correlation']
@@ -1381,7 +1306,19 @@ elif st.session_state.current_page == "patrones":
                     gap_display['Gap'] = gap_display['Gap'].round(2)
                     gap_display['Rendimiento'] = gap_display['Rendimiento'].round(2)
                     
-                    st.dataframe(gap_display, use_container_width=True)
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        st.dataframe(gap_display, use_container_width=True)
+                    
+                    with col2:
+                        gaps_csv = gap_display.to_csv(index=False, encoding='utf-8')
+                        st.download_button(
+                            label="📥 CSV Gaps",
+                            data=gaps_csv,
+                            file_name=f"gaps_recientes_{st.session_state.ticker_seleccionado}.csv",
+                            mime="text/csv",
+                            help="Descargar análisis de gaps recientes"
+                        )
                     
                     # Análisis del último gap significativo
                     last_significant_gap = recent_gaps[recent_gaps['Gap'].abs() > 1].tail(1)
@@ -1544,6 +1481,58 @@ elif st.session_state.current_page == "patrones":
                     st.success(f"🚀 **Zona de Compra**: Más cerca del soporte ({support_distance:.1f}%) que resistencia ({resistance_distance:.1f}%)")
                 else:
                     st.warning(f"📈 **Zona Neutral**: Equidistante entre S/R - Esperar confirmación direccional")
+                
+                # Preparar datos de S/R para descarga
+                st.markdown("---")
+                col1, col2 = st.columns([3, 1])
+                
+                with col1:
+                    st.markdown("#### 📊 Niveles de Soporte y Resistencia")
+                    
+                    # Crear DataFrame combinado
+                    sr_data = []
+                    
+                    # Agregar resistencias
+                    for i, level_info in enumerate(resistance_levels[:5]):
+                        sr_data.append({
+                            'Tipo': 'Resistencia',
+                            'Nivel': f'R{i+1}',
+                            'Precio': round(level_info['level'], 2),
+                            'Toques': level_info['touches'],
+                            'Distancia_Actual_%': round(level_info['distance_from_current'], 2)
+                        })
+                    
+                    # Agregar soportes
+                    for i, level_info in enumerate(support_levels[:5]):
+                        sr_data.append({
+                            'Tipo': 'Soporte',
+                            'Nivel': f'S{i+1}',
+                            'Precio': round(level_info['level'], 2),
+                            'Toques': level_info['touches'],
+                            'Distancia_Actual_%': round(level_info['distance_from_current'], 2)
+                        })
+                    
+                    # Agregar precio actual
+                    sr_data.append({
+                        'Tipo': 'Precio_Actual',
+                        'Nivel': 'Actual',
+                        'Precio': round(current_price, 2),
+                        'Toques': '-',
+                        'Distancia_Actual_%': 0
+                    })
+                    
+                    sr_df = pd.DataFrame(sr_data)
+                    st.dataframe(sr_df, use_container_width=True)
+                
+                with col2:
+                    sr_csv = sr_df.to_csv(index=False, encoding='utf-8')
+                    st.download_button(
+                        label="📥 CSV S/R",
+                        data=sr_csv,
+                        file_name=f"soporte_resistencia_{st.session_state.ticker_seleccionado}.csv",
+                        mime="text/csv",
+                        help="Descargar niveles de soporte y resistencia"
+                    )
     
     else:
         st.info("📈 Análisis Avanzado de Patrones")
