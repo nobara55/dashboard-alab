@@ -729,12 +729,48 @@ if st.session_state.current_page == "principal":
         else:
             st.warning("No se pudo calcular la distribución de días por nivel de volatilidad.")
 
-        # Gráfico de cierre
+        # Gráfico de cierre con estadísticas
         st.subheader(f"Precio de cierre de {st.session_state.ticker_seleccionado.upper()}")
+        
+        # Calcular estadísticas del precio de cierre
+        precio_media = df['Close'].mean()
+        precio_mediana = df['Close'].median()
+        precio_std = df['Close'].std()
+        precio_varianza = df['Close'].var()
+        precio_cv = (precio_std / precio_media) * 100 if precio_media != 0 else 0
+        
         fig_cierre = go.Figure()
-        fig_cierre.add_trace(go.Scatter(x=df['Date'], y=df['Close'], mode='lines', name='Precio de cierre'))
-        fig_cierre.update_layout(xaxis_title="Fecha", yaxis_title="Precio (USD)")
+        fig_cierre.add_trace(go.Scatter(x=df['Date'], y=df['Close'], mode='lines', name='Precio de cierre', line=dict(color='blue', width=2)))
+        
+        # Agregar líneas estadísticas
+        fig_cierre.add_hline(y=precio_media, line_dash="solid", line_color="red", line_width=2, 
+                           annotation_text=f"Media: ${precio_media:.2f}")
+        fig_cierre.add_hline(y=precio_mediana, line_dash="dash", line_color="green", line_width=2,
+                           annotation_text=f"Mediana: ${precio_mediana:.2f}")
+        fig_cierre.add_hline(y=precio_media + precio_std, line_dash="dot", line_color="orange", line_width=1,
+                           annotation_text=f"+1σ: ${precio_media + precio_std:.2f}")
+        fig_cierre.add_hline(y=precio_media - precio_std, line_dash="dot", line_color="orange", line_width=1,
+                           annotation_text=f"-1σ: ${precio_media - precio_std:.2f}")
+        fig_cierre.add_hline(y=precio_media + 2*precio_std, line_dash="dashdot", line_color="purple", line_width=1,
+                           annotation_text=f"+2σ: ${precio_media + 2*precio_std:.2f}")
+        fig_cierre.add_hline(y=precio_media - 2*precio_std, line_dash="dashdot", line_color="purple", line_width=1,
+                           annotation_text=f"-2σ: ${precio_media - 2*precio_std:.2f}")
+        
+        fig_cierre.update_layout(
+            title="Precio de Cierre con Estadísticas Descriptivas",
+            xaxis_title="Fecha", 
+            yaxis_title="Precio (USD)",
+            height=500
+        )
         st.plotly_chart(fig_cierre, use_container_width=True)
+        
+        # Mostrar estadísticas en métricas
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Media", f"${precio_media:.2f}")
+        col2.metric("Mediana", f"${precio_mediana:.2f}")
+        col3.metric("Desv. Estándar", f"${precio_std:.2f}")
+        col4.metric("Varianza", f"${precio_varianza:.2f}")
+        col5.metric("Coef. Variación", f"{precio_cv:.2f}%")
 
         # Cálculos estadísticos
         st.subheader("Estadísticas de Rendimiento")
@@ -1183,6 +1219,114 @@ elif st.session_state.current_page == "patrones":
                     st.success(f"✅ **Efecto Confirmado**: Diferencia de {difference:.2f}% a favor Oct-Abr")
                 else:
                     st.info(f"ℹ️ **Efecto Débil**: Diferencia de solo {difference:.2f}%")
+                
+                # === ANÁLISIS DE RANGO DIARIO ===
+                if 'Rango' in df.columns and df['Rango'].notna().any():
+                    st.markdown("---")
+                    st.markdown("#### 📏 Análisis de Rango Diario")
+                    
+                    # Preparar datos de rango con información temporal
+                    df_rango = df.copy()
+                    df_rango['Month'] = df_rango['Date'].dt.month
+                    df_rango['DayOfWeek'] = df_rango['Date'].dt.dayofweek
+                    
+                    # Mapeo de días y meses
+                    day_names = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
+                    month_names = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 
+                                   'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+                    
+                    # Análisis de rango por mes
+                    monthly_range = df_rango.groupby('Month')['Rango'].agg([
+                        'mean', 'median', 'std', 'count'
+                    ]).round(4)
+                    monthly_range.index = [month_names[i-1] for i in monthly_range.index]
+                    
+                    # Análisis de rango por día de la semana
+                    daily_range = df_rango.groupby('DayOfWeek')['Rango'].agg([
+                        'mean', 'median', 'std', 'count'
+                    ]).round(4)
+                    daily_range.index = [day_names[i] for i in daily_range.index if i < len(day_names)]
+                    
+                    # Gráficos de rango
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        fig_range_month = px.bar(
+                            x=monthly_range.index,
+                            y=monthly_range['mean'],
+                            title="Rango Diario Promedio por Mes",
+                            labels={'y': 'Rango Promedio ($)', 'x': 'Mes'},
+                            color=monthly_range['mean'],
+                            color_continuous_scale='Viridis'
+                        )
+                        fig_range_month.update_layout(showlegend=False)
+                        st.plotly_chart(fig_range_month, use_container_width=True)
+                        
+                        # Tabla mensual
+                        st.markdown("**Estadísticas Mensuales:**")
+                        monthly_display = monthly_range.copy()
+                        monthly_display.columns = ['Promedio', 'Mediana', 'Desv_Est', 'Días']
+                        st.dataframe(monthly_display, use_container_width=True)
+                    
+                    with col2:
+                        fig_range_day = px.bar(
+                            x=daily_range.index,
+                            y=daily_range['mean'],
+                            title="Rango Diario Promedio por Día de la Semana",
+                            labels={'y': 'Rango Promedio ($)', 'x': 'Día de la Semana'},
+                            color=daily_range['mean'],
+                            color_continuous_scale='Plasma'
+                        )
+                        fig_range_day.update_layout(showlegend=False)
+                        st.plotly_chart(fig_range_day, use_container_width=True)
+                        
+                        # Tabla diaria
+                        st.markdown("**Estadísticas por Día:**")
+                        daily_display = daily_range.copy()
+                        daily_display.columns = ['Promedio', 'Mediana', 'Desv_Est', 'Días']
+                        st.dataframe(daily_display, use_container_width=True)
+                    
+                    # Insights del rango
+                    st.markdown("#### 💡 Insights del Rango Diario:")
+                    
+                    # Mejor y peor mes para volatilidad
+                    best_month_vol = monthly_range['mean'].idxmax()
+                    worst_month_vol = monthly_range['mean'].idxmin()
+                    
+                    # Mejor y peor día para volatilidad
+                    best_day_vol = daily_range['mean'].idxmax()
+                    worst_day_vol = daily_range['mean'].idxmin()
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.success(f"📈 **Mayor Volatilidad**: {best_month_vol} (${monthly_range.loc[best_month_vol, 'mean']:.2f})")
+                        st.info(f"📉 **Menor Volatilidad**: {worst_month_vol} (${monthly_range.loc[worst_month_vol, 'mean']:.2f})")
+                    
+                    with col2:
+                        st.success(f"📈 **Día más Volátil**: {best_day_vol} (${daily_range.loc[best_day_vol, 'mean']:.2f})")
+                        st.info(f"📉 **Día menos Volátil**: {worst_day_vol} (${daily_range.loc[worst_day_vol, 'mean']:.2f})")
+                    
+                    # Botones de descarga para análisis de rango
+                    col1, col2, col3 = st.columns([2, 1, 1])
+                    with col2:
+                        monthly_range_csv = monthly_display.to_csv(encoding='utf-8')
+                        st.download_button(
+                            label="📥 CSV Mensual",
+                            data=monthly_range_csv,
+                            file_name=f"rango_mensual_{st.session_state.ticker_seleccionado}.csv",
+                            mime="text/csv",
+                            help="Descargar análisis de rango por mes"
+                        )
+                    
+                    with col3:
+                        daily_range_csv = daily_display.to_csv(encoding='utf-8')
+                        st.download_button(
+                            label="📥 CSV Semanal",
+                            data=daily_range_csv,
+                            file_name=f"rango_semanal_{st.session_state.ticker_seleccionado}.csv",
+                            mime="text/csv",
+                            help="Descargar análisis de rango por día"
+                        )
         
         # TAB 3: MOMENTUM
         with tab3:
